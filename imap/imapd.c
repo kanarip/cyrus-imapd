@@ -10040,6 +10040,11 @@ static int backend_version(struct backend *be)
 	return 13;
     }
 
+    /* version 3.0.* is 13 */
+    if (strstr(be->banner, "3.0.")) {
+        return 13;
+    }
+
     /* version 2.5 is 13 */
     if (strstr(be->banner, "Cyrus IMAP 2.5.")
      || strstr(be->banner, "Cyrus IMAP Murder 2.5.")
@@ -10479,34 +10484,46 @@ static int do_xfer(struct xfer_header *xfer)
     return 0;
 }
 
-static int xfer_setquotaroot(struct xfer_header *xfer, const char *mboxname)
+static int xfer_setquotaroots(struct xfer_header *xfer)
 {
+    struct xfer_item *item;
     struct quota q;
     int r;
-    char extname[MAX_MAILBOX_NAME];
 
-    (*imapd_namespace.mboxname_toexternal)(&imapd_namespace, mboxname,
-					   imapd_userid, extname);
-    
-    quota_init(&q, mboxname);
-    r = quota_read(&q, NULL, 0);
-    if (r == IMAP_QUOTAROOT_NONEXISTENT) return 0;
-    if (r) return r;
-    
-    /* note use of + to force the setting of a nonexistant
-     * quotaroot */
-    prot_printf(xfer->be->out, "Q01 SETQUOTA {" SIZE_T_FMT "+}\r\n+%s ",
-		strlen(extname)+1, extname);
-    print_quota_limits(xfer->be->out, &q);
-    prot_printf(xfer->be->out, "\r\n");
-    quota_free(&q);
+    for (item = xfer->items; item; item = item->next) {
+        quota_init(&q, item->mbentry->name);
 
-    r = getresult(xfer->be->in, "Q01");
-    if (r) syslog(LOG_ERR,
-		  "Could not move mailbox: %s, " \
-		  "failed setting initial quota root\r\n",
-		  mboxname);
-    return r;
+        r = quota_read(&q, NULL, 0);
+
+        if (r == IMAP_QUOTAROOT_NONEXISTENT) {
+            quota_free(&q);
+            continue;
+        }
+
+        if (r) {
+            quota_free(&q);
+            return r;
+        }
+
+        /* note use of + to force the setting of a nonexistant
+         * quotaroot */
+        prot_printf(xfer->be->out, "Q01 SETQUOTA {" SIZE_T_FMT "+}\r\n+%s ",
+                    strlen(item->extname)+1, item->extname);
+        print_quota_limits(xfer->be->out, &q);
+        prot_printf(xfer->be->out, "\r\n");
+        quota_free(&q);
+
+        r = getresult(xfer->be->in, "Q01");
+        if (r) {
+            syslog(LOG_ERR,
+                      "Could not move mailbox: %s, " \
+                      "failed setting quota root\r\n",
+                      item->mbentry->name);
+            return r;
+        }
+    }
+
+    return 0;
 }
 
 static int xfer_addsubmailboxes(struct xfer_header *xfer, const char *mboxname)
@@ -10616,12 +10633,12 @@ static void cmd_xfer(const char *tag, const char *name,
 	    goto done;
 	}
 
-	/* set the quotaroot if needed */
-	r = xfer_setquotaroot(xfer, mailboxname);
-	if (r) goto done;
-
 	/* add all submailboxes to the move list as well */
 	r = xfer_addsubmailboxes(xfer, mailboxname);
+	if (r) goto done;
+
+	/* set quotaroots if needed */
+	r = xfer_setquotaroots(xfer);
 	if (r) goto done;
 
 	/* backport the seen file if needed */

@@ -816,6 +816,14 @@ static int cleanup_seen_subfolders(const char *mbname)
     return 0;
 }
 
+struct annotation_entry_t
+{
+    struct annotation_entry_t *next;
+    char *name;
+    char *userid;
+    struct buf content;
+};
+
 EXPORTED int undump_mailbox(const char *mbname,
 		   struct protstream *pin, struct protstream *pout,
 		   struct auth_state *auth_state __attribute((unused)))
@@ -829,14 +837,14 @@ EXPORTED int undump_mailbox(const char *mbname,
     int sieve_usehomedir = config_getswitch(IMAPOPT_SIEVEUSEHOMEDIR);
     const char *userid = NULL;
     int first_annotation = 1;
-    char *annotation = NULL;
+    struct annotation_entry_t *annotation = NULL;
     struct buf content = BUF_INITIALIZER;
     char *seen_file = NULL;
     char *mboxkey_file = NULL;
     quota_t old_quota_usage[QUOTA_NUMRESOURCES];
     int res;
     quota_t newquotas[QUOTA_NUMRESOURCES];
-    quota_t quotalimit = -1;
+    quota_t quotalimit = -2;
     annotate_state_t *astate = NULL;
 
     memset(&file, 0, sizeof(file));
@@ -862,7 +870,7 @@ EXPORTED int undump_mailbox(const char *mbname,
 	eatline(pin, c);
 	return IMAP_PROTOCOL_BAD_PARAMETERS;
     }
-    
+
     /* We should now have a number or a NIL */
     c = getword(pin, &data);
     if (!strcmp(data.s, "NIL")) {
@@ -885,7 +893,7 @@ EXPORTED int undump_mailbox(const char *mbname,
     } else if(c == ')') {
 	goto done;
     }
-    
+
     r = mailbox_open_exclusive(mbname, &mailbox);
     if (r == IMAP_MAILBOX_NONEXISTENT) {
 	mbentry_t *mbentry = NULL;
@@ -900,19 +908,16 @@ EXPORTED int undump_mailbox(const char *mbname,
     /* track quota use */
     mailbox_get_usage(mailbox, old_quota_usage);
 
-    astate = annotate_state_new();
-
     while(1) {
 	char fnamebuf[MAX_MAILBOX_PATH + 1024];
 	int isnowait, sawdigit;
 	unsigned long size;
 	unsigned long cutoff = ULONG_MAX / 10;
 	unsigned digit, cutlim = ULONG_MAX % 10;
-	annotation = NULL;
 	buf_reset(&content);
 	seen_file = NULL;
 	mboxkey_file = NULL;
-	
+
 	c = getastring(pin, pout, &file);
 	if(c != ' ') {
 	    r = IMAP_PROTOCOL_ERROR;
@@ -921,8 +926,13 @@ EXPORTED int undump_mailbox(const char *mbname,
 
 	if(!strncmp(file.s, "A-", 2)) {
 	    /* Annotation */
+            struct annotation_entry_t *prev = annotation;
 	    int i;
-	    char *tmpuserid;
+
+            annotation = xmalloc(sizeof(struct annotation_entry_t));
+            memset(annotation, 0, sizeof(struct annotation_entry_t));
+            buf_reset(&annotation->content);
+            annotation->next = prev;
 
 	    /* is this the first annotation? re-read cyrus.header/index */
 	    if (first_annotation) {
@@ -941,52 +951,40 @@ EXPORTED int undump_mailbox(const char *mbname,
 		r = IMAP_PROTOCOL_ERROR;
 		goto done;
 	    }
-	    tmpuserid = xmalloc(i-2+1);
-	    
-	    memcpy(tmpuserid, &(file.s[2]), i-2);
-	    tmpuserid[i-2] = '\0';
-	    
-	    annotation = xstrdup(&(file.s[i]));
+            annotation->userid = xmalloc(i-2+1);
+            memset(annotation->userid, 0, i-2+1);
+
+            memcpy(annotation->userid, &(file.s[2]), i-2);
+
+            annotation->name = xstrdup(&(file.s[i]));
 
 	    if(prot_getc(pin) != '(') {
 		r = IMAP_PROTOCOL_ERROR;
-		free(tmpuserid);
 		goto done;
-	    }	    
+	    }
 
 	    /* Parse the modtime...and ignore it */
 	    c = getword(pin, &data);
 	    if (c != ' ')  {
 		r = IMAP_PROTOCOL_ERROR;
-		free(tmpuserid);
 		goto done;
 	    }
 
-	    c = getbastring(pin, pout, &content);
+            c = getbastring(pin, pout, &annotation->content);
 	    /* xxx binary */
 
 	    if(c != ' ') {
 		r = IMAP_PROTOCOL_ERROR;
-		free(tmpuserid);
 		goto done;
 	    }
 
 	    /* got the contenttype...and ignore it */
 	    c = getastring(pin, pout, &data);
-	    
+
 	    if(c != ')') {
 		r = IMAP_PROTOCOL_ERROR;
-		free(tmpuserid);
 		goto done;
 	    }
-
-	    annotate_state_write(astate, annotation, tmpuserid,
-				     &content);
-    
-	    free(tmpuserid);
-	    free(annotation);
-	    annotation = NULL;
-	    buf_reset(&content);
 
 	    c = prot_getc(pin);
 	    if(c == ')') break; /* that was the last item */
@@ -1238,24 +1236,48 @@ EXPORTED int undump_mailbox(const char *mbname,
     buf_free(&file);
     buf_free(&data);
 
-    if (r)
-	annotate_state_abort(&mailbox->annot_state);
-
     if (curfile >= 0) close(curfile);
     /* we fiddled the files under the hood, so we can't do anything
      * BUT close it */
     mailbox_close(&mailbox);
 
     /* time to apply quota (mailbox must be unlocked) */
-    if (!r) {
-	for (res = 0; res < QUOTA_NUMRESOURCES; res++) {
-	    if (newquotas[res] != QUOTA_UNLIMITED) {
-		break;
-	    }
-	}
-	if (res < QUOTA_NUMRESOURCES) {
-	    mboxlist_setquotas(mbname, newquotas, 0);
-	}
+    if (!r && quotalimit != -2)
+        mboxlist_setquotas(mbname, newquotas, 0);
+
+    /* write annotations */
+    if (!r && annotation) {
+        r = mailbox_open_iwl(mbname, &mailbox);
+        if (r) goto done2;
+
+        mailbox->i.quota_annot_used = 0;
+
+        astate = annotate_state_new();
+        r = annotate_state_set_mailbox(astate, mailbox);
+        if (r) goto done2;
+
+        while (annotation) {
+            struct annotation_entry_t *next = annotation->next;
+
+            r = annotate_state_write(astate, annotation->name,
+                                     annotation->userid,
+                                     &annotation->content);
+            if (r) goto done2;
+
+            old_quota_usage[QUOTA_ANNOTSTORAGE] += annotation->content.len;
+
+            free(annotation->name);
+            free(annotation->userid);
+            buf_free(&annotation->content);
+            free(annotation);
+
+            annotation = next;
+        }
+
+        r = annotate_state_commit(&astate);
+        astate = NULL;
+
+        mailbox_close(&mailbox);
     }
 
     /* let's make sure the modification times are right */
@@ -1309,12 +1331,10 @@ EXPORTED int undump_mailbox(const char *mbname,
  done2:
     /* just in case we failed during the modifications, close again */
     mailbox_close(&mailbox);
-    if (!r)
-	r = annotate_state_commit(&astate);
-    else
+
+    if (astate)
 	annotate_state_abort(&astate);
-    free(annotation);
-    buf_free(&content);
+
     free(seen_file);
     free(mboxkey_file);
 

@@ -968,7 +968,7 @@ static int find_cb(void *rock, const char *key, size_t keylen,
 
     r = split_attribs(data, datalen, &value);
 
-    if (!r) r = frock->proc(mboxname, uid, entry, userid, &value, frock->rock);
+    if (!r) r = frock->proc(mboxname, uid, entry, userid ? userid : "", &value, frock->rock);
 
     return r;
 }

@@ -940,6 +940,11 @@ EXPORTED int undump_mailbox(const char *mbname,
 		mailbox_close(&mailbox);
 		r = mailbox_open_exclusive(mbname, &mailbox);
 		if (r) goto done;
+
+		if (!astate) {
+		    astate = annotate_state_new();
+		}
+
 		r = annotate_state_set_mailbox(astate, mailbox);
 		if (r) goto done;
 	    }

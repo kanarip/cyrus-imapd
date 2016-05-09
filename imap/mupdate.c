@@ -1604,7 +1604,7 @@ static void cmd_set(struct conn *C,
 	EXISTS, NOTACTIVE, DOESNTEXIST, ISOK, NOOUTPUT
     } msg = NOOUTPUT;
     
-    syslog(LOG_DEBUG, "cmd_set(fd:%d, %s)", C->fd, mailbox);
+    syslog(LOG_DEBUG, "cmd_set(fd:%d, %s, %d)", C->fd, mailbox, t);
 
     pthread_mutex_lock(&mailboxes_mutex); /* LOCK */
 
@@ -1641,7 +1641,7 @@ static void cmd_set(struct conn *C,
     } else if (t == SET_DEACTIVATE) {
 	t = SET_RESERVE;
     }
-    
+
     if (t == SET_DELETE) {
 	if (!m) {
 	    /* Check if we run in a discrete murder topology */
@@ -1649,12 +1649,11 @@ static void cmd_set(struct conn *C,
 		/* Replicated backends with the same server name issue
 		 * deletion twice. Suppress bailing out on the second one
 		 * (the replica).
+		 *
+		 * Note: This implies deleting a non-existing mailbox is OK.
 		 */
-		if (strcmp(m->location, location)) {
-		    /* failed; mailbox doesn't exist */
-		    msg = DOESNTEXIST;
-		    goto done;
-		}
+		msg = ISOK;
+		goto done;
 	    }
 	    /* otherwise do nothing (local delete on master) */
 	} else {
@@ -1676,13 +1675,14 @@ static void cmd_set(struct conn *C,
 	    m->t = t;
 	} else {
 	    struct mbent *newm;
-	    
+
 	    /* allocate new mailbox */
 	    if (acl) {
 		newm = xrealloc(m, sizeof(struct mbent) + strlen(acl));
 	    } else {
 		newm = xrealloc(m, sizeof(struct mbent) + 1);
 	    }
+
 	    newm->mailbox = xstrdup(mailbox);
 	    newm->location = xstrdup(location);
 
@@ -1741,7 +1741,7 @@ static void cmd_set(struct conn *C,
 	break;
     default:
 	break;
-    }    
+    }
 }
 
 static void cmd_find(struct conn *C, const char *tag, const char *mailbox,

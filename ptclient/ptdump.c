@@ -57,13 +57,20 @@ static int dump_cb(void *rockp __attribute__((unused)),
     struct auth_state *authstate = (struct auth_state *)data;
     int i;
     
-    printf("user: ");
-    fwrite(key, keylen, 1, stdout);
-    printf(" time: %d groups: %d\n",
+    if (!strncmp(key, "group:", 6)) {
+	printf("group: ");
+	fwrite(key+6, keylen-6, 1, stdout);
+    } else {
+	printf("user: ");
+	fwrite(key, keylen, 1, stdout);
+	printf(" -> %s\n", authstate->userid.id);
+    }
+
+    printf("    time: %d\n    groups: %d\n",
 	   (unsigned)authstate->mark, (unsigned)authstate->ngroups);
 
     for (i=0; i < authstate->ngroups; i++)
-	printf("  %s\n",authstate->groups[i].id);
+	printf("    %s\n",authstate->groups[i].id);
     
     return 0;
 }

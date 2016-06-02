@@ -933,7 +933,7 @@ static int ptsmodule_get_dn(
         if (rc != PTSM_OK)
             return rc;
 
-	if (ptsm->domain_base_dn && ptsm->domain_base_dn[0] != '\0' && (strrchr(canon_id, '@') != NULL)) {
+	if (ptsm->domain_base_dn && (strrchr(canon_id, '@') != NULL)) {
 	    syslog(LOG_DEBUG, "Attempting to get domain for %s from %s", canon_id, ptsm->domain_base_dn);
 
 	    /* Get the base dn to search from domain_base_dn searched on domain_scope with
@@ -1019,7 +1019,7 @@ static int ptsmodule_get_dn(
 	 * the *only* entry found.
 	 */
 	if (ldap_count_entries(ptsm->ld, res) < 1) {
-	    syslog(LOG_ERR, "No entries found");
+	    syslog(LOG_ERR, "No entries found (%s, %d)", __func__, __LINE__);
 	} else if (ldap_count_entries(ptsm->ld, res) > 1) {
 	    syslog(LOG_ERR, "Multiple entries found: %d", ldap_count_entries(ptsm->ld, res));
 	} else {
@@ -1191,15 +1191,68 @@ static int ptsmodule_make_authstate_filter(
     char *dn = NULL;
 
     rc = ptsmodule_connect();
+
     if (rc != PTSM_OK) {
         *reply = "ptsmodule_connect() failed";
         return rc;
     }
 
     rc = ptsmodule_get_dn(canon_id, size, &dn);
+
     if (rc != PTSM_OK) {
         *reply = "identifier not found";
         return rc;
+    }
+
+    rc = ldap_search_st(ptsm->ld, dn, LDAP_SCOPE_BASE, "(objectclass=*)", attrs, 0, &(ptsm->timeout), &res);
+
+    if (rc != LDAP_SUCCESS) {
+        *reply = "ldap_search(attribute) failed";
+
+        if ( rc == LDAP_SERVER_DOWN ) {
+            ldap_unbind(ptsm->ld);
+            ptsm->ld = NULL;
+            rc = PTSM_RETRY;
+        } else {
+            rc = PTSM_FAIL;
+	}
+
+        goto done;
+    }
+
+    int numvals;
+
+    if ((entry = ldap_first_entry(ptsm->ld, res)) != NULL) {
+
+	if ((char *)ptsm->user_attribute) {
+	    vals = ldap_get_values(ptsm->ld, entry, (char *)ptsm->user_attribute);
+
+	    if (vals != NULL) {
+		numvals = ldap_count_values(vals);
+
+		if (numvals == 1) {
+		    if (!*newstate) {
+			*dsize = sizeof(struct auth_state);
+			*newstate = xmalloc(*dsize);
+
+			if (*newstate == NULL) {
+			    *reply = "no memory";
+			    rc = PTSM_FAIL;
+			    goto done;
+			}
+
+			(*newstate)->ngroups = 0;
+		    }
+
+		    size = strlen(vals[0]);
+		    strcpy((*newstate)->userid.id, ptsmodule_canonifyid(vals[0], size));
+		    (*newstate)->userid.hash = strhash((*newstate)->userid.id);
+		}
+
+		ldap_value_free(vals);
+		vals = NULL;
+	    }
+	}
     }
 
     rc = ptsmodule_expand_tokens(ptsm->member_filter, canon_id, dn, &filter);
@@ -1227,6 +1280,7 @@ static int ptsmodule_make_authstate_filter(
     }
 
     n = ldap_count_entries(ptsm->ld, res);
+
     if (n < 0) {
         *reply = "ldap_count_entries() failed";
         rc = PTSM_FAIL;
@@ -1235,45 +1289,51 @@ static int ptsmodule_make_authstate_filter(
 
     *dsize = sizeof(struct auth_state) +
              (n * sizeof(struct auth_ident));
+
     *newstate = xmalloc(*dsize);
+
     if (*newstate == NULL) {
         *reply = "no memory";
         rc = PTSM_FAIL;
         goto done;
     }
+
+    size = strlen(canon_id);
+
     (*newstate)->ngroups = n;
-    strcpy((*newstate)->userid.id, canon_id);
-    (*newstate)->userid.hash = strhash(canon_id);
+    strcpy((*newstate)->userid.id, ptsmodule_canonifyid(canon_id, size));
+    (*newstate)->userid.hash = strhash((*newstate)->userid.id);
     (*newstate)->mark = time(0);
 
     for (i = 0, entry = ldap_first_entry(ptsm->ld, res); entry != NULL;
          i++, entry = ldap_next_entry(ptsm->ld, entry)) {
 
-    vals = ldap_get_values(ptsm->ld, entry, (char *)ptsm->member_attribute);
-    if (vals == NULL)
-        continue;
+	vals = ldap_get_values(ptsm->ld, entry, (char *)ptsm->member_attribute);
+	if (vals == NULL)
+	    continue;
 
-    if ( ldap_count_values( vals ) != 1 ) {
-        *reply = "too many values";
-        rc = PTSM_FAIL;
-        ldap_value_free(vals);
-        vals = NULL;
-        goto done;
-    }
+	if ( ldap_count_values( vals ) != 1 ) {
+	    *reply = "too many values";
+	    rc = PTSM_FAIL;
+	    ldap_value_free(vals);
+	    vals = NULL;
+	    goto done;
+	}
 
-    strcpy((*newstate)->groups[i].id, "group:");
+	strcpy((*newstate)->groups[i].id, "group:");
 
-    unsigned int j;
-    for (j =0; j < strlen(vals[0]); j++) {
-      if(Uisupper(vals[0][j]))
-        vals[0][j]=tolower(vals[0][j]);
-    }
+	unsigned int j;
+	for (j =0; j < strlen(vals[0]); j++) {
+	    if(Uisupper(vals[0][j])) {
+		vals[0][j]=tolower(vals[0][j]);
+	    }
+	}
 
-    strlcat((*newstate)->groups[i].id, vals[0], sizeof((*newstate)->groups[i].id));
-    (*newstate)->groups[i].hash = strhash((*newstate)->groups[i].id);
+	strlcat((*newstate)->groups[i].id, vals[0], sizeof((*newstate)->groups[i].id));
+	(*newstate)->groups[i].hash = strhash((*newstate)->groups[i].id);
 
-    ldap_value_free(vals);
-    vals = NULL;
+	ldap_value_free(vals);
+	vals = NULL;
     }
 
     rc = PTSM_OK;
@@ -1343,7 +1403,7 @@ static int ptsmodule_make_authstate_group(
 
 	snprintf(domain_filter, sizeof(domain_filter), ptsm->domain_filter, domain);
 
-	syslog(LOG_DEBUG, "(groups) Domain filter: %s", domain_filter);
+	syslog(LOG_DEBUG, "(groups) Base DN: %s, Domain filter: %s", ptsm->domain_base_dn, domain_filter);
 
 	rc = ldap_search_st(ptsm->ld, ptsm->domain_base_dn, ptsm->domain_scope, domain_filter, domain_attrs, 0, &(ptsm->timeout), &res);
 

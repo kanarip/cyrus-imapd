@@ -105,7 +105,6 @@ static void test_to_userid(void)
 {
     static const char SAM_DRAFTS[] = "user.sam.Drafts";
     static const char BETTYAT_SENT[] = "boop.com!user.betty.Sent";
-    static const char JOHNDOE_SENT[] = "example.org!user.john^doe.Sent";
     static const char SHARED[] = "shared.Gossip";
     static const char SHAREDAT[] = "foonly.com!shared.Tattle";
     const char *r;
@@ -116,11 +115,6 @@ static void test_to_userid(void)
     r = mboxname_to_userid(BETTYAT_SENT);
     CU_ASSERT_STRING_EQUAL(r, "betty@boop.com");
 
-    imapopts[IMAPOPT_UNIXHIERARCHYSEP].val.b = 1;
-    r = mboxname_to_userid(JOHNDOE_SENT);
-    CU_ASSERT_STRING_EQUAL(r, "john.doe@example.org");
-
-    imapopts[IMAPOPT_UNIXHIERARCHYSEP].val.b = 0;
     r = mboxname_to_userid(SHARED);
     CU_ASSERT_PTR_NULL(r);
 

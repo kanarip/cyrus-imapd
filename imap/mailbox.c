@@ -737,6 +737,9 @@ EXPORTED void mailbox_make_uniqueid(struct mailbox *mailbox)
     uuid_t uu;
 
     uuid_clear(uu);	/* Just In Case */
+
+    syslog(LOG_DEBUG, "%s:%d(%s) not that you know where it comes from, but it happened", __FILE__, __LINE__, __func__);
+
     uuid_generate(uu);
     free(mailbox->uniqueid);
     /* 36 bytes of uuid plus \0 */
@@ -3675,8 +3678,11 @@ EXPORTED int mailbox_create(const char *name,
     mailbox->index_size = INDEX_HEADER_SIZE;
 
     mailbox->header_dirty = 1;
+
     if (!uniqueid) {
+	syslog(LOG_DEBUG, "%s:%d(%s): there is no uniqueid for mailbox %s", __FILE__, __LINE__, __func__, mailbox->name);
 	mailbox_make_uniqueid(mailbox);
+
     } else {
 	mailbox->uniqueid = xstrdup(uniqueid);
     }
@@ -3988,6 +3994,19 @@ EXPORTED int mailbox_copy_files(struct mailbox *mailbox, const char *newpart,
 	}
     }
 
+    // Ensure the directory hierarchy is created, especially for empty mailbox
+    // spool directories (split metadata)
+    xstrncpy(newbuf, mboxname_datapath(newpart, newname, 1), MAX_MAILBOX_PATH);
+
+    syslog(LOG_DEBUG, "%s:%d(%s) creating path %s", __FILE__, __LINE__, __func__, newbuf);
+
+    if (cyrus_mkdir(newbuf, 0755) == -1) {
+	syslog(LOG_DEBUG, "Created the mboxname_datapath(%s, %s, 0)", newpart, newname);
+	return IMAP_IOERROR;
+    } else {
+	syslog(LOG_DEBUG, "Created the mboxname_datapath(%s, %s, 0)", newpart, newname);
+    }
+
     for (recno = 1; recno <= mailbox->i.num_records; recno++) {
 	r = mailbox_read_index_record(mailbox, recno, &record);
 	if (r) return r;
@@ -4061,10 +4080,11 @@ HIDDEN int mailbox_rename_copy(struct mailbox *oldmailbox,
 
     /* INBOX rename - change uniqueid */
     if (userid) {
-        mailbox_make_uniqueid(newmailbox);
+	syslog(LOG_DEBUG, "%s:%d(%s) generating a new uuid (for an inbox rename?)", __FILE__, __LINE__, __func__);
+	mailbox_make_uniqueid(newmailbox);
 
-    r = seen_copy(userid, oldmailbox, newmailbox);
-    if (r) goto fail;
+	r = seen_copy(userid, oldmailbox, newmailbox);
+	if (r) goto fail;
     }
 
     /* copy any mailbox annotations (but keep the known quota
@@ -4397,6 +4417,8 @@ static int mailbox_reconstruct_create(const char *name, struct mailbox **mbptr)
 	/* Header failed to read - recreate it */
 	printf("%s: failed to read header file\n", mailbox->name);
 	syslog(LOG_ERR, "failed to read header file for %s", mailbox->name);
+
+	syslog(LOG_DEBUG, "%s:%d(%s) generating a new uuid -- probably not here", __FILE__, __LINE__, __func__);
 
 	mailbox_make_uniqueid(mailbox);
 	r = mailbox_commit(mailbox);

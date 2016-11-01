@@ -490,9 +490,13 @@ EXPORTED int dump_mailbox(const char *tag, struct mailbox *mailbox, uint32_t uid
 	syslog(LOG_ERR,
 	       "could not dump mailbox %s (permission denied)", mailbox->name);
 	return IMAP_PERMISSION_DENIED;
+    } else if (!mbdir && errno == ENOENT) {
+	syslog(LOG_ERR,
+	       "could not dump mailbox %s (no such file or directory %s)", mailbox->name, mailbox_datapath(mailbox));
+	return IMAP_SYS_ERROR;
     } else if (!mbdir) {
 	syslog(LOG_ERR,
-	       "could not dump mailbox %s (unknown error)", mailbox->name);
+	       "could not dump mailbox %s (unknown error %d)", mailbox->name, errno);
 	return IMAP_SYS_ERROR;
     }
 

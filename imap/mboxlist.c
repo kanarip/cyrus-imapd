@@ -528,6 +528,9 @@ EXPORTED int mboxlist_update(mbentry_t *mbentry, int localonly)
     struct txn *tid = NULL;
 
     mboxent = mboxlist_entry_cstring(mbentry);
+
+    syslog(LOG_DEBUG, "cyrusdb_store mboxent: %s", mboxent);
+
     r = cyrusdb_store(mbdb, mbentry->name, strlen(mbentry->name),
 		      mboxent, strlen(mboxent), &tid);
     free(mboxent);
@@ -559,8 +562,10 @@ EXPORTED int mboxlist_update(mbentry_t *mbentry, int localonly)
 
     if (tid) {
 	if (r) {
+	    syslog(LOG_DEBUG, "cyrusdb_abort");
 	    r2 = cyrusdb_abort(mbdb, tid);
 	} else {
+	    syslog(LOG_DEBUG, "cyrusdb_commit");
 	    r2 = cyrusdb_commit(mbdb, tid);
 	}
     }
@@ -977,10 +982,34 @@ EXPORTED int mboxlist_createsync(const char *name, int mbtype,
 			const char *acl, const char *uniqueid,
 			struct mailbox **mboxptr)
 {
-    return mboxlist_createmailbox_full(name, mbtype, partition,
-				       1, userid, auth_state,
-				       options, uidvalidity, acl, uniqueid,
-				       0, 1, 0, mboxptr);
+    int r;
+
+    syslog(LOG_DEBUG, "%s:%d(%s)", __FILE__, __LINE__, __func__);
+
+    r = mboxlist_createmailbox_full(
+	    name,	    // const char *mboxname
+	    mbtype,	    // int mbtype
+	    partition,	    // const char *partition
+	    1,		    // int isadmin
+	    userid,	    // const char *userid
+	    auth_state,	    // struct auth_state *auth_state
+	    options,	    // int options
+	    uidvalidity,    // unsigned uidvalidity
+	    acl,	    // const char *copyacl
+	    uniqueid,	    // const char *uniqueid
+	    1,		    // int localonly
+	    1,		    // int forceuser
+	    0,		    // int dbonly
+	    mboxptr	    // struct mailbox **mboxptr
+	);
+
+    if (!r) {
+	syslog(LOG_DEBUG, "%s:%d(%s) name: %s, partition %s successfully created", __FILE__, __LINE__, __func__, name, partition);
+    } else {
+	syslog(LOG_DEBUG, "%s:%d(%s) name: %s, partition %s creation unsuccessful?", __FILE__, __LINE__, __func__, name, partition);
+    }
+
+    return r;
 }
 
 /* insert an entry for the proxy */
@@ -1344,6 +1373,8 @@ EXPORTED int mboxlist_renamemailbox(const char *oldname, const char *newname,
     r = mailbox_open_iwl(oldname, &oldmailbox);
     if (r) return r;
 
+    syslog(LOG_DEBUG, "%s:%d(%s) here!", __FILE__, __LINE__, __func__);
+
     myrights = cyrus_acl_myrights(auth_state, oldmailbox->acl);
 
     /* check the ACLs up-front */
@@ -1360,7 +1391,11 @@ EXPORTED int mboxlist_renamemailbox(const char *oldname, const char *newname,
 
     /* special case: same mailbox, must be a partition move */
     if (!strcmp(oldname, newname)) {
+	syslog(LOG_DEBUG, "%s:%d(%s) here!", __FILE__, __LINE__, __func__);
+
 	char *oldpath = mailbox_datapath(oldmailbox);
+
+	syslog(LOG_DEBUG, "%s:%d(%s) oldpath: %s", __FILE__, __LINE__, __func__, oldpath);
 
 	/* Only admin can move mailboxes between partitions */
 	if (!isadmin) {
@@ -1383,10 +1418,14 @@ EXPORTED int mboxlist_renamemailbox(const char *oldname, const char *newname,
 	    r = IMAP_PARTITION_UNKNOWN;
 	    goto done;
 	}
+
+        syslog(LOG_DEBUG, "%s:%d(%s) here! root: %s", __FILE__, __LINE__, __func__, root);
+
 	if (!strncmp(root, oldpath, strlen(root)) &&
 	    oldpath[strlen(root)] == '/') {
 	    /* partitions are the same or share common prefix */
 	    r = IMAP_MAILBOX_EXISTS;
+	    syslog(LOG_DEBUG, "%s:%d(%s) here, mailbox is reported to exist!", __FILE__, __LINE__, __func__);
 	    goto done;
 	}
 
@@ -1396,17 +1435,35 @@ EXPORTED int mboxlist_renamemailbox(const char *oldname, const char *newname,
 	 * codepaths: INBOX -> INBOX.foo, user rename, regular rename
 	 * and of course this one, partition move */
 	newpartition = xstrdup(partition);
+
+	syslog(LOG_DEBUG, "%s:%d(%s) here! newpartition: %s", __FILE__, __LINE__, __func__, newpartition);
+
 	r = mailbox_copy_files(oldmailbox, newpartition, newname);
-	if (r) goto done;
+
+	if (r) {
+	    syslog(LOG_DEBUG, "%s:%d(%s) here!", __FILE__, __LINE__, __func__);
+	    goto done;
+	} else {
+	    syslog(LOG_DEBUG, "%s:%d(%s) mailbox_copy_files is OK", __FILE__, __LINE__, __func__);
+	}
+
 	newmbentry = mboxlist_entry_create();
 	newmbentry->mbtype = oldmailbox->mbtype;
 	newmbentry->partition = xstrdupnull(newpartition);
 	newmbentry->acl = xstrdupnull(oldmailbox->acl);
+	newmbentry->uniqueid = xstrdupnull(oldmailbox->uniqueid);
 	newmbentry->uidvalidity = oldmailbox->i.uidvalidity;
 	mboxent = mboxlist_entry_cstring(newmbentry);
+
+	syslog(LOG_DEBUG, "%s:%d(%s) here! mboxent: %s", __FILE__, __LINE__, __func__, mboxent);
+
 	r = cyrusdb_store(mbdb, newname, strlen(newname), 
 		          mboxent, strlen(mboxent), &tid);
-	if (r) goto done;
+
+	if (r) {
+	    syslog(LOG_DEBUG, "%s:%d(%s) here!", __FILE__, __LINE__, __func__);
+	    goto done;
+	}
 
 	/* skip ahead to the commit */
 	goto dbdone;

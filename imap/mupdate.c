@@ -1595,9 +1595,11 @@ static void cmd_set(struct conn *C,
 	     const char *location, const char *acl, enum settype t)
 {
     struct mbent *m;
+    mbentry_t *mbentry = NULL;
     char *oldlocation = NULL;
     char *thislocation = NULL;
     char *tmp;
+    int r;
 
     /* Hold any output that we need to do */
     enum {
@@ -1609,6 +1611,16 @@ static void cmd_set(struct conn *C,
     pthread_mutex_lock(&mailboxes_mutex); /* LOCK */
 
     m = database_lookup(mailbox, NULL);
+
+    r = mboxlist_lookup_allow_all(mailbox, &mbentry, NULL);
+
+    if (!r) {
+	syslog(LOG_DEBUG, "%s(%d):%s mbentry->mbtype: %s", __FILE__, __LINE__, __func__, mboxlist_mbtype_to_string(mbentry->mbtype));
+	mboxlist_entry_free(&mbentry);
+    } else {
+	syslog(LOG_DEBUG, "non-zero return code from mboxlist_lookup");
+    }
+
     if (m && t == SET_RESERVE) {
 	/* Check if we run in a discrete murder topology */
 	if (config_mupdate_config == IMAP_ENUM_MUPDATE_CONFIG_STANDARD) {
@@ -1618,6 +1630,7 @@ static void cmd_set(struct conn *C,
 	     */
 	    if (strcmp(m->location, location)) {
 		/* failed; mailbox already exists */
+		syslog(LOG_DEBUG, "%s(%d):%s m->l: %s, m->t: %d, l: %s, t: %d", __FILE__, __LINE__, __func__, m->location, m->t, location, t);
 		msg = EXISTS;
 		goto done;
 	    }
@@ -1810,6 +1823,7 @@ static int sendupdate(char *name,
     if (!C) return -1;
     
     m = database_lookup(name, NULL);
+
     if (!m) return -1;
 
     if (!C->list_prefix ||

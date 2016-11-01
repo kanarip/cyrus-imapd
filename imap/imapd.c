@@ -1675,6 +1675,9 @@ static void cmdloop(void)
 
 		if (c != ' ') goto missingargs;
 		c = getastring(imapd_in, imapd_out, &arg1);
+
+		syslog(LOG_DEBUG, "arg1.s: %s", arg1.s);
+
 		if (c == EOF) goto missingargs;
 		if (c == ' ') {
 		    c = parsecreateargs(&extargs);
@@ -5373,16 +5376,16 @@ static void cmd_create(char *tag, char *name, struct dlist *extargs, int localon
     int mbtype = 0;
     const char *partition = NULL;
     const char *server = NULL;
+    const char *uniqueid = NULL;
     struct buf specialuse = BUF_INITIALIZER;
     struct dlist *use;
 
     dlist_getatom(extargs, "PARTITION", &partition);
     dlist_getatom(extargs, "SERVER", &server);
+    dlist_getatom(extargs, "UNIQUEID", &uniqueid);
 
     const char *type = NULL;
 
-    dlist_getatom(extargs, "PARTITION", &partition);
-    dlist_getatom(extargs, "SERVER", &server);
     if (dlist_getatom(extargs, "TYPE", &type)) {
 	if (!strcasecmp(type, "CALENDAR")) mbtype |= MBTYPE_CALENDAR;
 	else if (!strcasecmp(type, "ADDRESSBOOK")) mbtype |= MBTYPE_ADDRESSBOOK;
@@ -5427,6 +5430,11 @@ static void cmd_create(char *tag, char *name, struct dlist *extargs, int localon
 		goto err;
 	    }
 	}
+    }
+
+    if (uniqueid && (!imapd_userisadmin || !localonly)) {
+	r = IMAP_PERMISSION_DENIED;
+	goto err;
     }
 
     /* We don't care about trailing hierarchy delimiters. */
@@ -5622,6 +5630,14 @@ localcreate:
 	    1,							// int notify
 	    NULL						// struct mailbox mailboxptr
 	);
+
+    if (!r && uniqueid) {
+	mbentry_t *mbentry = NULL;
+	r = mboxlist_lookup(mailboxname, &mbentry, NULL);
+	mbentry->uniqueid = xstrdupnull(uniqueid);
+	r = mboxlist_update(mbentry, /*localonly*/1);
+	mboxlist_entry_free(&mbentry);
+    }
 
 #ifdef USE_AUTOCREATE
     // Clausing autocreate for the INBOX
@@ -6049,6 +6065,8 @@ static void cmd_rename(char *tag, char *oldname, char *newname, char *location)
     r = mlookup(NULL, NULL, oldmailboxname, &mbentry);
 
     if (!r && mbentry->mbtype & MBTYPE_REMOTE) {
+	syslog(LOG_DEBUG, "rename/xfer issued for remote mailbox");
+
 	/* remote mailbox */
 	struct backend *s = NULL;
 	int res;
@@ -6077,8 +6095,16 @@ static void cmd_rename(char *tag, char *oldname, char *newname, char *location)
 		free(destserver);
 	    }
 
+	    syslog(LOG_DEBUG, "%s:%d(%s): destpart: %s", __FILE__, __LINE__, __func__, destpart);
+
 	    if (destserver) {
+
+		syslog(LOG_DEBUG, "%s:%d(%s): destserver: %s", __FILE__, __LINE__, __func__, destserver);
+
 		if (destpart && !strcmp(destserver,config_servername)) {
+
+		    syslog(LOG_DEBUG, "%s:%d(%s): destserver: %s, config_servername: %s", __FILE__, __LINE__, __func__, destserver, config_servername);
+
 		    // XFER
 		    prot_printf(s->out,
 			    "%s XFER \"%s\" \"%s\" %s\r\n",
@@ -6089,6 +6115,8 @@ static void cmd_rename(char *tag, char *oldname, char *newname, char *location)
 			);
 
 		} else {
+		    syslog(LOG_DEBUG, "%s:%d(%s): rename, no dest part or config_servername == destserver", __FILE__, __LINE__, __func__);
+
 		    // RENAME
 		    prot_printf(s->out,
 			    "%s RENAME \"%s\" \"%s\" %s\r\n",
@@ -6098,7 +6126,10 @@ static void cmd_rename(char *tag, char *oldname, char *newname, char *location)
 			    location
 			);
 		}
-	    } // (destserver)
+	    } else { // (destserver)
+
+		syslog(LOG_DEBUG, "%s:%d(%s): !destserver for location %s", __FILE__, __LINE__, __func__, location);
+	    }
 
 	    res = pipe_until_tag(s, tag, 0);
 
@@ -6106,6 +6137,8 @@ static void cmd_rename(char *tag, char *oldname, char *newname, char *location)
 	    if (ultraparanoid && res == PROXY_OK) kick_mupdate();
 
 	} else { // (location)
+	    syslog(LOG_DEBUG, "%s:%d(%s): no location", __FILE__, __LINE__, __func__);
+
 	    // a simple rename, old name and new name must not be the same
 	    if (!strcmp(oldname, newname)) {
 		prot_printf(imapd_out, "%s NO %s\r\n", tag, error_message(IMAP_SERVER_UNAVAILABLE));
@@ -6136,6 +6169,8 @@ static void cmd_rename(char *tag, char *oldname, char *newname, char *location)
 	}
 
 	goto done;
+    } else {
+	syslog(LOG_DEBUG, "rename/xfer issued for a local mailbox");
     }
 
     mboxlist_entry_free(&mbentry);
@@ -6211,6 +6246,12 @@ static void cmd_rename(char *tag, char *oldname, char *newname, char *location)
 					   newmailboxname,
 					   imapd_userid, newextname);
 
+    if (recursive_rename) {
+	syslog(LOG_DEBUG, "%s:%d(%s): recursive rename", __FILE__, __LINE__, __func__);
+    } else {
+	syslog(LOG_DEBUG, "%s:%d(%s): no recursive rename", __FILE__, __LINE__, __func__);
+    }
+
     /* rename all mailboxes matching this */
     if (recursive_rename && strcmp(oldmailboxname, newmailboxname)) {
 	struct renrock rock;
@@ -6252,10 +6293,14 @@ static void cmd_rename(char *tag, char *oldname, char *newname, char *location)
 	if (strcmp(oldmailboxname, newmailboxname))
 	    mboxevent = mboxevent_new(EVENT_MAILBOX_RENAME);
 
+
+	syslog(LOG_DEBUG, "mboxlist_renamemailbox from %s to %s on location %s", oldmailboxname, newmailboxname, location);
+
 	r = mboxlist_renamemailbox(oldmailboxname, newmailboxname, location,
 				   0 /* uidvalidity */, imapd_userisadmin,
 				   imapd_userid, imapd_authstate, mboxevent,
 				   0, 0, rename_user);
+
 	/* it's OK to not exist if there are subfolders */
 	if (r == IMAP_MAILBOX_NONEXISTENT && subcount && !rename_user &&
 	   mboxname_userownsmailbox(imapd_userid, oldmailboxname) &&
@@ -6264,6 +6309,8 @@ static void cmd_rename(char *tag, char *oldname, char *newname, char *location)
 	    mboxevent_free(&mboxevent);
 
 	    goto submboxes;
+	} else {
+	    syslog(LOG_DEBUG, "%s:%d(%s) r: %d", __FILE__, __LINE__, __func__, r);
 	}
 
 	/* send a MailboxRename event notification if enabled */
@@ -7894,16 +7941,24 @@ static int parsecreateargs(struct dlist **extargs)
     char *p;
     const char *name;
 
+    syslog(LOG_DEBUG, "%s:%d here!", __FILE__, __LINE__);
+
     res = dlist_newkvlist(NULL, "CREATE");
 
     c = prot_getc(imapd_in);
     if (c == '(') {
+	syslog(LOG_DEBUG, "%s:%d here!", __FILE__, __LINE__);
+
 	/* new style RFC4466 arguments */
 	do {
 	    c = getword(imapd_in, &arg);
 	    name = ucase(arg.s);
+	    syslog(LOG_DEBUG, "%s:%d here! name: %s", __FILE__, __LINE__, name);
+
 	    if (c != ' ') goto fail;
+
 	    c = prot_getc(imapd_in);
+
 	    if (c == '(') {
 		/* fun - more lists! */
 		sub = dlist_newlist(res, name);
@@ -7914,10 +7969,15 @@ static int parsecreateargs(struct dlist **extargs)
 		if (c != ')') goto fail;
 		c = prot_getc(imapd_in);
 	    }
+
 	    else {
 		prot_ungetc(c, imapd_in);
+
 		c = getword(imapd_in, &val);
+
+		syslog(LOG_DEBUG, "%s:%d here! name: %s, val: %s", __FILE__, __LINE__, name, val.s);
 		dlist_setatom(res, name, val.s);
+
 	    }
 	} while (c == ' ');
 	if (c != ')') goto fail;
@@ -10107,7 +10167,10 @@ static int xfer_init(const char *toserver, const char *topart,
     xfer->remoteversion = backend_version(xfer->be);
 
     xfer->toserver = xstrdup(toserver);
-    xfer->topart = xstrdup(topart);
+
+    if (topart)
+	xfer->topart = xstrdup(topart);
+
     xfer->seendb = NULL;
 
     /* connect to mupdate server if configured */
@@ -10149,13 +10212,35 @@ static int xfer_localcreate(struct xfer_header *xfer)
     for (item = xfer->items; item; item = item->next) {
 	if (xfer->topart) {
 	    /* need to send partition as an atom */
-	    prot_printf(xfer->be->out, "LC1 LOCALCREATE {" SIZE_T_FMT "+}\r\n%s %s\r\n",
-			strlen(item->extname), item->extname, xfer->topart);
+	    prot_printf(
+		    xfer->be->out,
+		    "LC1 LOCALCREATE %s (UNIQUEID %s PARTITION %s)\r\n",
+		    item->extname,
+		    item->mbentry->uniqueid,
+		    xfer->topart
+		);
+
+	} else if (item->mbentry->partition) {
+	    /* need to send partition as an atom */
+	    prot_printf(
+		    xfer->be->out,
+		    "LC1 LOCALCREATE %s (UNIQUEID %s PARTITION %s)\r\n",
+		    item->extname,
+		    item->mbentry->uniqueid,
+		    item->mbentry->partition
+		);
+
 	} else {
-	    prot_printf(xfer->be->out, "LC1 LOCALCREATE {" SIZE_T_FMT "+}\r\n%s\r\n",
-			strlen(item->extname), item->extname);
+	    prot_printf(
+		    xfer->be->out,
+		    "LC1 LOCALCREATE %s (UNIQUEID %s)\r\n",
+		    item->extname,
+		    item->mbentry->uniqueid
+		);
 	}
+
 	r = getresult(xfer->be->in, "LC1");
+
 	if (r) {
 	    syslog(LOG_ERR, "Could not move mailbox: %s, LOCALCREATE failed",
 		   item->mbentry->name);
@@ -10607,7 +10692,6 @@ static void cmd_xfer(const char *tag, const char *name,
     r = mboxlist_lookup(mailboxname, &mbentry, NULL);
     if (r) goto done;
 
-    if (!topart) topart = mbentry->partition;
     r = xfer_init(toserver, topart, &xfer);
     if (r) goto done;
 

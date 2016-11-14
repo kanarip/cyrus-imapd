@@ -1847,7 +1847,7 @@ int sieve_eval_bc(sieve_execute_t *exe, int is_incl, sieve_interp_t *i,
 		    } else {
 			/* s[0] contains the original subject */
 			const char *origsubj = s[0];
-			snprintf(subject, sizeof(subject), "Auto: %s", origsubj);
+			snprintf(subject, sizeof(subject), "Auto: %s", charset_decode_mimeheader(origsubj, 0));
 		    }
 		} else {
 		    /* user specified subject */

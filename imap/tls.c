@@ -243,7 +243,7 @@ static int DH_set0_pqg(DH *dh, BIGNUM *p, BIGNUM *q, BIGNUM *g)
  * XXX we might be able to just replace this with DH_get_1024_160?
  * XXX the apps/s_server.c example doesn't use this anymore at all.
  */
-static DH *get_dh1024(void)
+static DH *get_dh2048(void)
 {
     /* Second Oakley group 1024-bits MODP group from RFC2409 */
     DH *dh;
@@ -252,7 +252,7 @@ static DH *get_dh1024(void)
     dh = DH_new();
     if (!dh) return NULL;
 
-    p = get_rfc2409_prime_1024(NULL);
+    p = get_rfc3526_prime_2048(NULL);
     BN_dec2bn(&g, "2");
 
     if (DH_set0_pqg(dh, p, NULL, g))
@@ -277,7 +277,7 @@ static DH *load_dh_param(const char *keyfile, const char *certfile)
     if (bio) ret=PEM_read_bio_DHparams(bio,NULL,NULL,NULL);
 
     if (ret == NULL) {
-	ret = get_dh1024();
+	ret = get_dh2048();
 	syslog(LOG_NOTICE, "inittls: Loading hard-coded DH parameters");
     } else {
 	syslog(LOG_NOTICE, "inittls: Loading DH parameters from file");

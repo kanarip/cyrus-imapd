@@ -10222,38 +10222,6 @@ static int xfer_localcreate(struct xfer_header *xfer)
 		    xfer->topart,
 		    item->mbentry->uniqueid
 		);
-
-	// Compare the mbentry's partition to the default partition.
-	} else if (item->mbentry->partition != NULL) {
-	    char *part = xstrdupsafe(item->mbentry->partition);
-	    // If the default partition and the mbentry partition are
-	    // different, then push the mailbox on the remote end's equivalent
-	    // non-default partition.
-	    if (strcmp(config_defpartition, part)) {
-		prot_printf(
-			xfer->be->out,
-			"LC1 LOCALCREATE {" SIZE_T_FMT "+}\r\n"
-			"%s (PARTITION %s UNIQUEID %s)\r\n",
-			strlen(item->extname),
-			item->extname,
-			item->mbentry->partition,
-			item->mbentry->uniqueid
-		    );
-
-	    } else {
-		// Same partition, we don't care where it ends up, whatever is
-		// the default on the remote end.
-		prot_printf(
-			xfer->be->out,
-			"LC1 LOCALCREATE {" SIZE_T_FMT "+}\r\n"
-			"%s (UNIQUEID %s)\r\n",
-			strlen(item->extname),
-			item->extname,
-			item->mbentry->uniqueid
-		    );
-	    }
-
-	// No partition specified, no partition on the entry, just go ahead
 	} else {
 	    prot_printf(
 		    xfer->be->out,

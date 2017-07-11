@@ -2396,8 +2396,14 @@ static void cmd_login(char *tag, char *user)
 
     if (r) {
 	eatline(imapd_in, ' ');
-	syslog(LOG_NOTICE, "badlogin: %s %s LOGIN invalid user",
-	       imapd_clienthost, beautify_string(user));
+	syslog(
+	    LOG_NOTICE,
+	    "badlogin: %s %s LOGIN%s invalid user",
+	    imapd_clienthost,
+	    beautify_string(user),
+	    imapd_starttls_done ? "+TLS" : ""
+	);
+
 	prot_printf(imapd_out, "%s NO %s\r\n", tag, 
 		    error_message(IMAP_INVALID_USER));
 	return;
@@ -2462,8 +2468,14 @@ static void cmd_login(char *tag, char *user)
 				 strlen(canon_user),
 				 passwd,
 				 strlen(passwd))) != SASL_OK) {
-	syslog(LOG_NOTICE, "badlogin: %s %s LOGIN %s",
-	       imapd_clienthost, canon_user, sasl_errdetail(imapd_saslconn));
+	syslog(
+	    LOG_NOTICE,
+	    "badlogin: %s %s LOGIN%s %s",
+	    imapd_clienthost,
+	    canon_user,
+	    imapd_starttls_done ? "+TLS" : "",
+	    sasl_errdetail(imapd_saslconn)
+	);
 
 	failedloginpause = config_getint(IMAPOPT_FAILEDLOGINPAUSE);
 	if (failedloginpause != 0) {
@@ -2585,9 +2597,10 @@ static void cmd_authenticate(char *tag, char *authtype, char *resp)
 	    /* failed authentication */
 	    syslog(
 		LOG_NOTICE,
-		"badlogin: %s %s AUTHENTICATE+%s [%s]",
+		"badlogin: %s %s AUTHENTICATE+%s%s [%s]",
 		imapd_clienthost,
 		val,
+		imapd_starttls_done ? "+TLS" : "",
 		authtype,
 		sasl_errdetail(imapd_saslconn)
 	    );

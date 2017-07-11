@@ -10224,11 +10224,12 @@ static int xfer_localcreate(struct xfer_header *xfer)
 		);
 
 	// Compare the mbentry's partition to the default partition.
-	} else if (item->mbentry->partition) {
+	} else if (item->mbentry->partition != NULL) {
+	    char *part = xstrdupsafe(item->mbentry->partition);
 	    // If the default partition and the mbentry partition are
 	    // different, then push the mailbox on the remote end's equivalent
 	    // non-default partition.
-	    if (strcmp(config_defpartition, item->mbentry->partition)) {
+	    if (strcmp(config_defpartition, part)) {
 		prot_printf(
 			xfer->be->out,
 			"LC1 LOCALCREATE {" SIZE_T_FMT "+}\r\n"

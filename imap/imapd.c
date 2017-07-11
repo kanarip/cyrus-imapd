@@ -2383,7 +2383,7 @@ static void cmd_login(char *tag, char *user)
     const char *reply = NULL;
     int r;
     int failedloginpause;
-    
+
     if (imapd_userid) {
 	eatline(imapd_in, ' ');
 	prot_printf(imapd_out, "%s BAD Already logged in\r\n", tag);
@@ -2396,7 +2396,7 @@ static void cmd_login(char *tag, char *user)
 
     if (r) {
 	eatline(imapd_in, ' ');
-	syslog(LOG_NOTICE, "badlogin: %s plaintext %s invalid user",
+	syslog(LOG_NOTICE, "badlogin: %s %s LOGIN invalid user",
 	       imapd_clienthost, beautify_string(user));
 	prot_printf(imapd_out, "%s NO %s\r\n", tag, 
 		    error_message(IMAP_INVALID_USER));
@@ -2462,7 +2462,7 @@ static void cmd_login(char *tag, char *user)
 				 strlen(canon_user),
 				 passwd,
 				 strlen(passwd))) != SASL_OK) {
-	syslog(LOG_NOTICE, "badlogin: %s plaintext %s %s",
+	syslog(LOG_NOTICE, "badlogin: %s %s LOGIN %s",
 	       imapd_clienthost, canon_user, sasl_errdetail(imapd_saslconn));
 
 	failedloginpause = config_getint(IMAPOPT_FAILEDLOGINPAUSE);
@@ -2579,10 +2579,18 @@ static void cmd_authenticate(char *tag, char *authtype, char *resp)
 			"%s NO Error reading client response: %s\r\n",
 			tag, errorstring ? errorstring : "");
 	    break;
-	default: 
+	default:
+	    sasl_getprop(imapd_saslconn, SASL_USERNAME, &val);
+
 	    /* failed authentication */
-	    syslog(LOG_NOTICE, "badlogin: %s %s [%s]",
-		   imapd_clienthost, authtype, sasl_errdetail(imapd_saslconn));
+	    syslog(
+		LOG_NOTICE,
+		"badlogin: %s %s AUTHENTICATE+%s [%s]",
+		imapd_clienthost,
+		val,
+		authtype,
+		sasl_errdetail(imapd_saslconn)
+	    );
 
 	    snmp_increment_args(AUTHENTICATION_NO, 1,
 				VARIABLE_AUTH, 0, /* hash_simple(authtype) */ 

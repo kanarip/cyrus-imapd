@@ -10208,6 +10208,7 @@ static int xfer_localcreate(struct xfer_header *xfer)
 
     // Note that the mailbox name needs to be sent as an atom in order to
     // prevent having to escape space characters.
+    config_defpartition = config_getstring(IMAPOPT_DEFAULTPARTITION);
 
     for (item = xfer->items; item; item = item->next) {
 	// The target partition has been specified explicitly.

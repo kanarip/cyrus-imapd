@@ -950,11 +950,6 @@ EXPORTED const char *get_clienthost(int s, const char **localip, const char **re
     if (getpeername(s, remotesock, &salen) == 0 &&
 	(remotesock->sa_family == AF_INET ||
 	 remotesock->sa_family == AF_INET6)) {
-	/* connected to an internet socket */
-	if (getnameinfo(remotesock, salen,
-			hbuf, sizeof(hbuf), NULL, 0, NI_NAMEREQD) == 0) {
-	    buf_printf(&clientbuf, "%s ", hbuf);
-	}
 
 	niflags = NI_NUMERICHOST;
 #ifdef NI_WITHSCOPEID

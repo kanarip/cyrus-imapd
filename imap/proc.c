@@ -263,6 +263,8 @@ EXPORTED int proc_foreach(procdata_t *func, void *rock)
 	    if (*p == '.') continue; /* dot files */
 	    pid = strtoul(p, &end, 10);
 	    if (pid == 0 || end == NULL || *end || end == p) {
+		if (strstr(p, ".new") != NULL) continue; /* .new files */
+
 		syslog(LOG_ERR, "IOERROR: bogus filename \"%s/%s\" in proc_foreach",
 				path, p);
 		continue;

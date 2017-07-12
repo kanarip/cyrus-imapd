@@ -10204,6 +10204,7 @@ static void xfer_addmbox(struct xfer_header *xfer,
 static int xfer_localcreate(struct xfer_header *xfer)
 {
     struct xfer_item *item;
+    char *uniqueid;
     int r;
 
     // Note that the mailbox name needs to be sent as an atom in order to
@@ -10211,6 +10212,8 @@ static int xfer_localcreate(struct xfer_header *xfer)
     config_defpartition = config_getstring(IMAPOPT_DEFAULTPARTITION);
 
     for (item = xfer->items; item; item = item->next) {
+	uniqueid = xstrdupnull(item->mbentry->uniqueid);
+
 	// The target partition has been specified explicitly.
 	if (xfer->topart) {
 	    prot_printf(
@@ -10220,8 +10223,9 @@ static int xfer_localcreate(struct xfer_header *xfer)
 		    strlen(item->extname),
 		    item->extname,
 		    xfer->topart,
-		    item->mbentry->uniqueid
+		    uniqueid ? uniqueid : "NIL"
 		);
+
 	} else {
 	    prot_printf(
 		    xfer->be->out,
@@ -10229,8 +10233,9 @@ static int xfer_localcreate(struct xfer_header *xfer)
 		    "%s (UNIQUEID %s)\r\n",
 		    strlen(item->extname),
 		    item->extname,
-		    item->mbentry->uniqueid
+		    uniqueid ? uniqueid : "NIL"
 		);
+
 	}
 
 	r = getresult(xfer->be->in, "LC1");

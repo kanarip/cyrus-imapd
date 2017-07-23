@@ -2592,7 +2592,7 @@ static void cmd_authenticate(char *tag, char *authtype, char *resp)
 			tag, errorstring ? errorstring : "");
 	    break;
 	default:
-	    sasl_getprop(imapd_saslconn, SASL_USERNAME, &val);
+	    sasl_getprop(imapd_saslconn, SASL_USERNAME, (const void **)&val);
 
 	    /* failed authentication */
 	    syslog(

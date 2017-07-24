@@ -2592,16 +2592,11 @@ static void cmd_authenticate(char *tag, char *authtype, char *resp)
 			tag, errorstring ? errorstring : "");
 	    break;
 	default:
-	    sasl_getprop(imapd_saslconn, SASL_USERNAME, &val);
-
-	    canon_user = (const char *) val;
-
 	    /* failed authentication */
 	    syslog(
 		LOG_NOTICE,
-		"badlogin: %s %s AUTHENTICATE+%s%s [%s]",
+		"badlogin: %s unknown AUTHENTICATE+%s%s [%s]",
 		imapd_clienthost,
-		canon_user,
 		authtype,
 		imapd_starttls_done ? "+TLS" : "",
 		sasl_errdetail(imapd_saslconn)

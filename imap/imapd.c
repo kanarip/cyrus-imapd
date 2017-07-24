@@ -2602,8 +2602,8 @@ static void cmd_authenticate(char *tag, char *authtype, char *resp)
 		"badlogin: %s %s AUTHENTICATE+%s%s [%s]",
 		imapd_clienthost,
 		canon_user,
-		imapd_starttls_done ? "+TLS" : "",
 		authtype,
+		imapd_starttls_done ? "+TLS" : "",
 		sasl_errdetail(imapd_saslconn)
 	    );
 

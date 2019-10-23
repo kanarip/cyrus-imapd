@@ -263,7 +263,7 @@ static char *ptsmodule_canonifyid(const char *identifier, size_t len)
      */
     username_tolower = config_getswitch(IMAPOPT_USERNAME_TOLOWER);
     sawalpha = 0;
-    for(p = retbuf+i; *p; p++) {
+    for (p = retbuf+i; *p; p++) {
         if (username_tolower && Uisupper(*p))
             *p = tolower((unsigned char)*p);
 
@@ -286,7 +286,7 @@ static char *ptsmodule_canonifyid(const char *identifier, size_t len)
 }
 
 
-static int ptsmodule_connect(void) 
+static int ptsmodule_connect(void)
 {
 	int rc = 0;
 
@@ -403,37 +403,46 @@ static int ptsmodule_connect(void)
 	
 	if (ptsm->sasl) {
 
-		if (EMPTY(ptsm->mech))
-			ldap_get_option(ptsm->ld, LDAP_OPT_X_SASL_MECH, &(ptsm->mech));
+	    if (EMPTY(ptsm->mech))
+		ldap_get_option(ptsm->ld, LDAP_OPT_X_SASL_MECH, &(ptsm->mech));
 
-		if (EMPTY(ptsm->realm))
-			ldap_get_option(ptsm->ld, LDAP_OPT_X_SASL_REALM, &(ptsm->realm));
+	    if (EMPTY(ptsm->realm))
+		ldap_get_option(ptsm->ld, LDAP_OPT_X_SASL_REALM, &(ptsm->realm));
 
-		if (ISSET(ptsm->sasl_secprops)) {
-			rc = ldap_set_option(ptsm->ld, LDAP_OPT_X_SASL_SECPROPS, (void *) ptsm->sasl_secprops);
-			if( rc != LDAP_OPT_SUCCESS ) {
-				syslog(LOG_ERR, "Unable to set LDAP_OPT_X_SASL_SECPROPS.");
-				ldap_unbind(ptsm->ld);
-                ptsm->ld = NULL;
-				return PTSM_FAIL;
-			}
+	    if (ISSET(ptsm->sasl_secprops)) {
+		rc = ldap_set_option(ptsm->ld, LDAP_OPT_X_SASL_SECPROPS, (void *) ptsm->sasl_secprops);
+		if( rc != LDAP_OPT_SUCCESS ) {
+		    syslog(LOG_ERR, "Unable to set LDAP_OPT_X_SASL_SECPROPS.");
+		    ldap_unbind(ptsm->ld);
+		    ptsm->ld = NULL;
+		    return PTSM_FAIL;
 		}
+	    }
 
-		rc = ldap_sasl_interactive_bind_s(
-			ptsm->ld, 
-			ptsm->bind_dn,
-			ptsm->mech, 
-			NULL, 
-			NULL, 
-			LDAP_SASL_QUIET, 
-			ptsmodule_interact, 
-			ptsm);
-	} else
-		rc = ldap_simple_bind_s(ptsm->ld, ptsm->bind_dn, ptsm->password);
+	    rc = ldap_sasl_interactive_bind_s(
+		ptsm->ld,
+		ptsm->bind_dn,
+		ptsm->mech,
+		NULL,
+		NULL,
+		LDAP_SASL_QUIET,
+		ptsmodule_interact,
+		ptsm
+	    );
+
+	} else {
+	    rc = ldap_simple_bind_s(ptsm->ld, ptsm->bind_dn, ptsm->password);
+	}
 
     if (rc != LDAP_SUCCESS) {
-        syslog(LOG_ERR,
-               (ptsm->sasl ? "ldap_sasl_interactive_bind() failed %d (%s)." : "ldap_simple_bind() failed %d (%s)."), rc, ldap_err2string(rc));
+        syslog(
+	    LOG_ERR,
+	    "%s() failed %d (%s)",
+	    (ptsm->sasl ? "ldap_sasl_interactive_bind" : "ldap_simple_bind"),
+	    rc,
+	    ldap_err2string(rc)
+	);
+
         ldap_unbind(ptsm->ld);
         ptsm->ld = NULL;
         return (rc == LDAP_SERVER_DOWN ? PTSM_RETRY : PTSM_FAIL);
@@ -655,7 +664,7 @@ static int ptsmodule_standard_root_dn(const char *domain, const char **result)
 	syslog(LOG_DEBUG, "Root DN now %s", buf_cstring(&buf));
 
 	part = strtok_r(NULL, ".", &tok_state);
-	
+
 	if (part != NULL)
 	    buf_appendcstr(&buf, dc_sep);
     }
@@ -1077,68 +1086,68 @@ static int ptsmodule_make_authstate_attribute(
     }
 
     if ((entry = ldap_first_entry(ptsm->ld, res)) != NULL) {
-    int i, numvals;
+	int i, numvals;
 
-    vals = ldap_get_values(ptsm->ld, entry, (char *)ptsm->member_attribute);
-    if (vals != NULL) {
-        numvals = ldap_count_values( vals );
+	vals = ldap_get_values(ptsm->ld, entry, (char *)ptsm->member_attribute);
+	if (vals != NULL) {
+	    numvals = ldap_count_values( vals );
 
-        *dsize = sizeof(struct auth_state) +
-             (numvals * sizeof(struct auth_ident));
-        *newstate = xmalloc(*dsize);
-        if (*newstate == NULL) {
-            *reply = "no memory";
-            rc = PTSM_FAIL;
-            goto done;
-        }
+	    *dsize = sizeof(struct auth_state) +
+		 (numvals * sizeof(struct auth_ident));
+	    *newstate = xmalloc(*dsize);
+	    if (*newstate == NULL) {
+		*reply = "no memory";
+		rc = PTSM_FAIL;
+		goto done;
+	    }
 
-        (*newstate)->ngroups = numvals;
-        (*newstate)->userid.id[0] = '\0';
-        for (i = 0; i < numvals; i++) {
-            unsigned int j;
-            strcpy((*newstate)->groups[i].id, "group:");
-            rdn = ldap_explode_rdn(vals[i],1);
-            for (j = 0; j < strlen(rdn[0]); j++) {
-              if (Uisupper(rdn[0][j]))
-                  rdn[0][j]=tolower(rdn[0][j]);
-            }
-            strlcat((*newstate)->groups[i].id, rdn[0], sizeof((*newstate)->groups[i].id));
-            (*newstate)->groups[i].hash = strhash((*newstate)->groups[i].id);
-        }
+	    (*newstate)->ngroups = numvals;
+	    (*newstate)->userid.id[0] = '\0';
+	    for (i = 0; i < numvals; i++) {
+		unsigned int j;
+		strcpy((*newstate)->groups[i].id, "group:");
+		rdn = ldap_explode_rdn(vals[i],1);
+		for (j = 0; j < strlen(rdn[0]); j++) {
+		    if (Uisupper(rdn[0][j]))
+			rdn[0][j]=tolower(rdn[0][j]);
+		}
+		strlcat((*newstate)->groups[i].id, rdn[0], sizeof((*newstate)->groups[i].id));
+		(*newstate)->groups[i].hash = strhash((*newstate)->groups[i].id);
+	    }
 
-        ldap_value_free(rdn);
-        ldap_value_free(vals);
-        vals = NULL;
-    }
+	    ldap_value_free(rdn);
+	    ldap_value_free(vals);
+	    vals = NULL;
+	}
 
-    if ((char *)ptsm->user_attribute) {
-        vals = ldap_get_values(ptsm->ld, entry, (char *)ptsm->user_attribute);
-        if (vals != NULL) {
-            numvals = ldap_count_values( vals );
+	if ((char *)ptsm->user_attribute) {
+	    vals = ldap_get_values(ptsm->ld, entry, (char *)ptsm->user_attribute);
+	    if (vals != NULL) {
+		numvals = ldap_count_values(vals);
 
-                if (numvals==1) {
-                    if(!*newstate) {
-                        *dsize = sizeof(struct auth_state);
-                        *newstate = xmalloc(*dsize);
+		if (numvals==1) {
+		    if(!*newstate) {
+			*dsize = sizeof(struct auth_state);
+			*newstate = xmalloc(*dsize);
 
-                        if (*newstate == NULL) {
-                            *reply = "no memory";
-                            rc = PTSM_FAIL;
-                            goto done;
-                        }
+			if (*newstate == NULL) {
+			    *reply = "no memory";
+			    rc = PTSM_FAIL;
+			    goto done;
+			}
 
-                        (*newstate)->ngroups = 0;
-                    }
+			(*newstate)->ngroups = 0;
+		    }
 
-                    size=strlen(vals[0]);
-                    strcpy((*newstate)->userid.id, ptsmodule_canonifyid(vals[0],size));
-                    (*newstate)->userid.hash = strhash((*newstate)->userid.id);
-                }
+		    size=strlen(vals[0]);
+		    strcpy((*newstate)->userid.id, ptsmodule_canonifyid(vals[0],size));
+		    (*newstate)->userid.hash = strhash((*newstate)->userid.id);
+		}
 
-                ldap_value_free(vals);
-                vals = NULL;
-            }
-        }
+		ldap_value_free(vals);
+		vals = NULL;
+	    }
+	}
     }
 
     if(!*newstate) {
@@ -1187,7 +1196,8 @@ static int ptsmodule_make_authstate_filter(
     LDAPMessage *res = NULL;
     LDAPMessage *entry = NULL;
     char **vals = NULL;
-    char *attrs[] = {(char *)ptsm->member_attribute,NULL};
+    char *group_attrs[] = {(char *)ptsm->member_attribute,NULL};
+    char *user_attrs[] = {(char *)ptsm->user_attribute,NULL};
     char *dn = NULL;
 
     rc = ptsmodule_connect();
@@ -1197,6 +1207,8 @@ static int ptsmodule_make_authstate_filter(
         return rc;
     }
 
+    // get the user DN for expansion in to the filter down the road, and to get the user attribute
+    // value to use as a mailbox name (user_id.id in newstate)
     rc = ptsmodule_get_dn(canon_id, size, &dn);
 
     if (rc != PTSM_OK) {
@@ -1204,7 +1216,11 @@ static int ptsmodule_make_authstate_filter(
         return rc;
     }
 
-    rc = ldap_search_st(ptsm->ld, dn, LDAP_SCOPE_BASE, "(objectclass=*)", attrs, 0, &(ptsm->timeout), &res);
+    // from the dn, read user_attribute and set it as the canon_id in newstate
+    rc = ldap_search_st(
+        ptsm->ld, dn, LDAP_SCOPE_BASE, "(objectclass=*)",
+        user_attrs, 0, &(ptsm->timeout), &res
+    );
 
     if (rc != LDAP_SUCCESS) {
         *reply = "ldap_search(attribute) failed";
@@ -1215,7 +1231,7 @@ static int ptsmodule_make_authstate_filter(
             rc = PTSM_RETRY;
         } else {
             rc = PTSM_FAIL;
-	}
+        }
 
         goto done;
     }
@@ -1224,50 +1240,63 @@ static int ptsmodule_make_authstate_filter(
 
     if ((entry = ldap_first_entry(ptsm->ld, res)) != NULL) {
 
-	if ((char *)ptsm->user_attribute) {
-	    vals = ldap_get_values(ptsm->ld, entry, (char *)ptsm->user_attribute);
+        if ((char *)ptsm->user_attribute) {
+           vals = ldap_get_values(ptsm->ld, entry, (char *)ptsm->user_attribute);
 
-	    if (vals != NULL) {
-		numvals = ldap_count_values(vals);
+           if (vals != NULL) {
+               numvals = ldap_count_values(vals);
 
-		if (numvals == 1) {
-		    if (!*newstate) {
-			*dsize = sizeof(struct auth_state);
-			*newstate = xmalloc(*dsize);
+               if (numvals == 1) {
+                   if (!*newstate) {
+                       *dsize = sizeof(struct auth_state);
+                       *newstate = xmalloc(*dsize);
 
-			if (*newstate == NULL) {
-			    *reply = "no memory";
-			    rc = PTSM_FAIL;
-			    goto done;
-			}
+                       if (*newstate == NULL) {
+                           *reply = "no memory";
+                           rc = PTSM_FAIL;
+                           goto done;
+                       }
 
-			(*newstate)->ngroups = 0;
-		    }
+                       (*newstate)->ngroups = 0;
+                   }
 
-		    size = strlen(vals[0]);
-		    strcpy((*newstate)->userid.id, ptsmodule_canonifyid(vals[0], size));
-		    (*newstate)->userid.hash = strhash((*newstate)->userid.id);
-		}
+                   size = strlen(vals[0]);
+                   strcpy((*newstate)->userid.id, ptsmodule_canonifyid(vals[0], size));
+                   (*newstate)->userid.hash = strhash((*newstate)->userid.id);
+               }
 
-		ldap_value_free(vals);
-		vals = NULL;
-	    }
-	}
+               ldap_value_free(vals);
+               vals = NULL;
+           }
+        }
     }
 
+    // expand any tokens in the member filter
     rc = ptsmodule_expand_tokens(ptsm->member_filter, canon_id, dn, &filter);
     if (rc != PTSM_OK) {
         *reply = "ptsmodule_expand_tokens() failed for member filter";
         goto done;
     }
 
+    // expand any tokens in the member base
     rc = ptsmodule_expand_tokens(ptsm->member_base, canon_id, dn, &base);
     if (rc != PTSM_OK) {
-        *reply = "ptsmodule_expand_tokens() failed for member search base";
+        *reply = "ptsmodule_expand_tokens() failed for group search base";
         goto done;
     }
 
-    rc = ldap_search_st(ptsm->ld, base, ptsm->member_scope, filter, attrs, 0, &(ptsm->timeout), &res);
+    // execute the search for groups, return the attributes requested
+    rc = ldap_search_st(
+        ptsm->ld,
+        base,
+        ptsm->group_scope,
+        filter,
+        group_attrs,
+        0,
+        &(ptsm->timeout),
+        &res
+    );
+
     if (rc != LDAP_SUCCESS) {
         *reply = "ldap_search(filter) failed";
         if (rc == LDAP_SERVER_DOWN) {
@@ -1301,7 +1330,7 @@ static int ptsmodule_make_authstate_filter(
     size = strlen(canon_id);
 
     (*newstate)->ngroups = n;
-    strcpy((*newstate)->userid.id, ptsmodule_canonifyid(canon_id, size));
+    strcpy((*newstate)->userid.id, canon_id);
     (*newstate)->userid.hash = strhash((*newstate)->userid.id);
     (*newstate)->mark = time(0);
 
